@@ -12,13 +12,17 @@ The resolution can also be adjusted.
 
 # How to use
 Default usecase:
-`$ ./vtk-to-stl file1234.vtk file1234.stl`
+
+```$ ./vtk-to-stl file1234.vtk file1234.stl```
 
 Optional usecase:
-`$ ./vtk-to-stl file1234.vtk file1234.stl [threshold] [resolution] [gauss_radius] [gauss_deviation]`
+
+```$ ./vtk-to-stl file1234.vtk file1234.stl [threshold] [resolution] [gauss_radius] [gauss_deviation]```
 
 Example without blur:
-`$ ./vtk-to-stl file1234.vtk file1234.stl 0.25 64`
+
+```$ ./vtk-to-stl file1234.vtk file1234.stl 0.25 64```
 
 Example with blur:
-`$ ./vtk-to-stl file1234.vtk file1234.stl 0.25 64 2 2`
+
+```$ ./vtk-to-stl file1234.vtk file1234.stl 0.25 64 2 2```
