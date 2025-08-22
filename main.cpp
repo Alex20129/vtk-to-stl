@@ -11,14 +11,83 @@
 #include <vtkMarchingCubes.h>
 #include <vtkSTLWriter.h>
 
+enum symmetryAxis
+{
+	XAxis,
+	YAxis,
+	ZAxis,
+};
+
+void MakeSymmetrical(vtkImageData *imageData, symmetryAxis axis)
+{
+	vtkDataArray *scalars = imageData->GetPointData()->GetScalars("element_states_averaged_at_nodes");
+	int dims[3];
+	imageData->GetDimensions(dims);
+	double bounds[6];
+	imageData->GetBounds(bounds);
+	int symAxis = axis;
+	int iMax = dims[0];
+	int jMax = dims[1];
+	int kMax = dims[2];
+	for (int k = 0; k < kMax; ++k)
+	{
+		for (int j = 0; j < jMax; ++j)
+		{
+			for (int i = 0; i < iMax; ++i)
+			{
+				double coord[3];
+				int ijk[3] = {i, j, k};
+				vtkIdType pointId = imageData->ComputePointId(ijk);
+				imageData->GetPoint(pointId, coord);
+				if (coord[symAxis] < 0)
+				{
+					continue;
+				}
+				double symCoord[3] = {coord[0], coord[1], coord[2]};
+				symCoord[symAxis] = -coord[symAxis];
+				int symI = i, symJ = j, symK = k;
+				double spacing[3];
+				imageData->GetSpacing(spacing);
+				double origin[3];
+				imageData->GetOrigin(origin);
+				if (symAxis == XAxis)
+				{
+					symI = round((symCoord[XAxis] - origin[0]) / spacing[0]);
+				}
+				else if (symAxis == YAxis)
+				{
+					symJ = round((symCoord[YAxis] - origin[1]) / spacing[1]);
+				}
+				else // symAxis == ZAxis
+				{
+					symK = round((symCoord[ZAxis] - origin[2]) / spacing[2]);
+				}
+				if (symI < 0 || symI >= iMax || symJ < 0 || symJ >= jMax || symK < 0 || symK >= kMax)
+				{
+					continue;
+				}
+				int symijk[3] = {symI, symJ, symK};
+				vtkIdType symPointId = imageData->ComputePointId(symijk);
+				double value = scalars->GetComponent(pointId, 0);
+				double symValue = scalars->GetComponent(symPointId, 0);
+				double avgValue = (value + symValue) / 2.0;
+				scalars->SetComponent(pointId, 0, avgValue);
+				scalars->SetComponent(symPointId, 0, avgValue);
+			}
+		}
+	}
+	scalars->Modified();
+}
+
 int main(int argc, char *argv[])
 {
 	double threshold=0.5, resolution=128;
 	double gauss_radius=0.0, gauss_deviation=0.0;
+	bool XsymmetryFlag=false, YsymmetryFlag=false, ZsymmetryFlag=false;
 
 	if (argc < 3)
 	{
-		std::cerr << "Usage: " << argv[0] << " <input.vtk> <output.stl> [threshold=0.5] [resolution=128] [gauss_radius=0.0] [gauss_deviation=0.0]\n";
+		std::cerr << "Usage: " << argv[0] << " <input.vtk> <output.stl> [threshold=0.5] [resolution=128] [gauss_radius=0.0] [gauss_deviation=0.0] [symmetry]\n";
 		return 1;
 	}
 
@@ -39,6 +108,25 @@ int main(int argc, char *argv[])
 	if (argc > 6)
 	{
 		gauss_deviation=std::stod(argv[6]);
+	}
+	if (argc > 7)
+	{
+		std::string symmetryArg = std::string(argv[7]);
+		for (char c : symmetryArg)
+		{
+			if (c == 'x' || c == 'X')
+			{
+				XsymmetryFlag = true;
+			}
+			if (c == 'y' || c == 'Y')
+			{
+				YsymmetryFlag = true;
+			}
+			if (c == 'z' || c == 'Z')
+			{
+				ZsymmetryFlag = true;
+			}
+		}
 	}
 
 	if(gauss_deviation<=0.0)
@@ -110,6 +198,19 @@ int main(int argc, char *argv[])
 	imageData=resampler->GetOutput();
 
 	imageData->GetPointData()->SetActiveScalars("element_states_averaged_at_nodes");
+
+	if(XsymmetryFlag)
+	{
+		MakeSymmetrical(imageData, XAxis);
+	}
+	if(YsymmetryFlag)
+	{
+		MakeSymmetrical(imageData, YAxis);
+	}
+	if(ZsymmetryFlag)
+	{
+		MakeSymmetrical(imageData, ZAxis);
+	}
 
 	double padding=1.0+gauss_radius+gauss_deviation;
 	vtkImageConstantPad *padder=vtkImageConstantPad::New();
