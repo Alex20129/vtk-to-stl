@@ -5,6 +5,7 @@
 #include <vtkUnstructuredGridReader.h>
 #include <vtkResampleToImage.h>
 #include <vtkPointData.h>
+#include <vtkCellData.h>
 #include <vtkImageData.h>
 #include <vtkImageGaussianSmooth.h>
 #include <vtkImageConstantPad.h>
@@ -138,32 +139,30 @@ int main(int argc, char *argv[])
 		gauss_deviation=gauss_radius=0.0;
 	}
 
-	vtkUnstructuredGridReader *vtkGridReader=vtkUnstructuredGridReader::New();
-	vtkGridReader->SetFileName(inputFilename.c_str());
+	vtkUnstructuredGridReader *gridReader=vtkUnstructuredGridReader::New();
+	gridReader->SetFileName(inputFilename.c_str());
+	gridReader->SetScalarsName("element_states");
+	gridReader->Update();
 
-	vtkGridReader->SetScalarsName("element_states_averaged_at_nodes");
-	vtkGridReader->Update();
-
-	if (!vtkGridReader->GetOutput())
+	vtkUnstructuredGrid *unstructuredGrid=gridReader->GetOutput();
+	if (!unstructuredGrid)
 	{
 		std::cerr << "Error: Could not read VTK file: " << inputFilename << std::endl;
 		return 1;
 	}
-
-	vtkUnstructuredGrid *grid=vtkGridReader->GetOutput();
-	std::cout << *grid;
+	if (unstructuredGrid->GetNumberOfCells() == 0)
+	{
+		std::cerr << "Error: Grid is empty: " << inputFilename << std::endl;
+		return 1;
+	}
+	std::cout << *unstructuredGrid;
 
 	double gridBounds[6];
-	grid->GetBounds(gridBounds);
+	unstructuredGrid->GetBounds(gridBounds);
 
 	double xSize=gridBounds[1] - gridBounds[0];
 	double ySize=gridBounds[3] - gridBounds[2];
 	double zSize=gridBounds[5] - gridBounds[4];
-	std::cout << "Model bounds:\n"
-		<< "  X: [" << gridBounds[0] << ", " << gridBounds[1] << "] (size: " << xSize << ")\n"
-		<< "  Y: [" << gridBounds[2] << ", " << gridBounds[3] << "] (size: " << ySize << ")\n"
-		<< "  Z: [" << gridBounds[4] << ", " << gridBounds[5] << "] (size: " << zSize << ")\n";
-
 	double voxelSize=std::min({xSize, ySize, zSize});
 	voxelSize /= resolution;
 
@@ -172,32 +171,16 @@ int main(int argc, char *argv[])
 	int nz=std::max(2, (int)std::round(zSize / voxelSize));
 	std::cout << "Sampling dimensions: " << nx << "x" << ny << "x" << nz << std::endl;
 
-	vtkPointData *pointData=grid->GetPointData();
-	if (!pointData->GetScalars("element_states_averaged_at_nodes"))
-	{
-		std::cerr << "Error: Scalar field 'element_states_averaged_at_nodes' not found in VTK file.\n";
-		std::cerr << "Available scalar fields in POINT_DATA:\n";
-		for (int i=0; i < pointData->GetNumberOfArrays(); ++i)
-		{
-			const char *arrayName=pointData->GetArrayName(i);
-			if (arrayName)
-			{
-				std::cerr << " - " << arrayName << std::endl;
-			}
-		}
-		return 1;
-	}
-
 	vtkImageData *imageData;
 
 	vtkResampleToImage *resampler=vtkResampleToImage::New();
-	resampler->SetInputDataObject(grid);
+	resampler->SetInputDataObject(unstructuredGrid);
 	resampler->SetSamplingDimensions(nx, ny, nz);
 	resampler->SetUseInputBounds(true);
 	resampler->Update();
 	imageData=resampler->GetOutput();
 
-	imageData->GetPointData()->SetActiveScalars("element_states_averaged_at_nodes");
+	imageData->GetPointData()->SetActiveScalars("element_states");
 
 	if(XsymmetryFlag)
 	{
