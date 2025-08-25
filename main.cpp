@@ -21,41 +21,44 @@ enum symmetryAxis
 
 void MakeSymmetrical(vtkImageData *imageData, symmetryAxis axis)
 {
-	vtkDataArray *scalars = imageData->GetPointData()->GetScalars("element_states_averaged_at_nodes");
+	vtkDataArray *scalars = imageData->GetPointData()->GetScalars();
+	if(!scalars)
+	{
+		return;
+	}
 	int dims[3];
 	imageData->GetDimensions(dims);
 	double bounds[6];
 	imageData->GetBounds(bounds);
-	int symAxis = axis;
 	int iMax = dims[0];
 	int jMax = dims[1];
 	int kMax = dims[2];
-	for (int k = 0; k < kMax; ++k)
+	for(int k = 0; k < kMax; ++k)
 	{
-		for (int j = 0; j < jMax; ++j)
+		for(int j = 0; j < jMax; ++j)
 		{
-			for (int i = 0; i < iMax; ++i)
+			for(int i = 0; i < iMax; ++i)
 			{
 				double coord[3];
 				int ijk[3] = {i, j, k};
 				vtkIdType pointId = imageData->ComputePointId(ijk);
 				imageData->GetPoint(pointId, coord);
-				if (coord[symAxis] < 0)
+				if(coord[axis] < 0)
 				{
 					continue;
 				}
 				double symCoord[3] = {coord[0], coord[1], coord[2]};
-				symCoord[symAxis] = -coord[symAxis];
+				symCoord[axis] = -coord[axis];
 				int symI = i, symJ = j, symK = k;
 				double spacing[3];
 				imageData->GetSpacing(spacing);
 				double origin[3];
 				imageData->GetOrigin(origin);
-				if (symAxis == XAxis)
+				if(axis == XAxis)
 				{
 					symI = round((symCoord[XAxis] - origin[0]) / spacing[0]);
 				}
-				else if (symAxis == YAxis)
+				else if(axis == YAxis)
 				{
 					symJ = round((symCoord[YAxis] - origin[1]) / spacing[1]);
 				}
@@ -63,7 +66,7 @@ void MakeSymmetrical(vtkImageData *imageData, symmetryAxis axis)
 				{
 					symK = round((symCoord[ZAxis] - origin[2]) / spacing[2]);
 				}
-				if (symI < 0 || symI >= iMax || symJ < 0 || symJ >= jMax || symK < 0 || symK >= kMax)
+				if(symI < 0 || symI >= iMax || symJ < 0 || symJ >= jMax || symK < 0 || symK >= kMax)
 				{
 					continue;
 				}
@@ -80,13 +83,59 @@ void MakeSymmetrical(vtkImageData *imageData, symmetryAxis axis)
 	scalars->Modified();
 }
 
+int ApplySmoothing(vtkImageData *imageData, double gauss_radius, double gauss_deviation)
+{
+	vtkDataArray *scalars = imageData->GetPointData()->GetScalars();
+	if(!scalars)
+	{
+		return 1;
+	}
+	vtkIdType componentID, numberOfValues=scalars->GetNumberOfValues();
+	std::vector<double> constant_buffer(numberOfValues, 0.0);
+	bool itHasConstantElements = false;
+	for(componentID = 0; componentID < numberOfValues; componentID++)
+	{
+		if(scalars->GetComponent(componentID, 0) >= 2.0)
+		{
+			constant_buffer[componentID] = 1.0;
+			scalars->SetComponent(componentID, 0, 1/16.0);
+			itHasConstantElements = true;
+		}
+		else
+		{
+			constant_buffer[componentID] = 0.0;
+		}
+	}
+	vtkImageGaussianSmooth *gaussianSmooth = vtkImageGaussianSmooth::New();
+	gaussianSmooth->SetInputData(imageData);
+	gaussianSmooth->SetRadiusFactor(gauss_radius);
+	gaussianSmooth->SetStandardDeviation(gauss_deviation, gauss_deviation, gauss_deviation);
+	gaussianSmooth->Update();
+	vtkImageData *smoothedImageData=gaussianSmooth->GetOutput();
+	if(itHasConstantElements)
+	{
+		vtkDataArray *smoothedScalars = smoothedImageData->GetPointData()->GetScalars();
+		for(componentID = 0; componentID < numberOfValues; componentID++)
+		{
+			if(constant_buffer[componentID] > 0.0)
+			{
+				smoothedScalars->SetComponent(componentID, 0, 1.0);
+			}
+		}
+	}
+	imageData->DeepCopy(smoothedImageData);
+	scalars->Modified();
+	gaussianSmooth->Delete();
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	double threshold=0.5, resolution=128;
 	double gauss_radius=0.0, gauss_deviation=0.0;
 	bool XsymmetryFlag=false, YsymmetryFlag=false, ZsymmetryFlag=false;
 
-	if (argc < 3)
+	if(argc < 3)
 	{
 		std::cerr << "Usage: " << argv[0] << " <input.vtk> <output.stl> [threshold=0.5] [resolution=128] [gauss_radius=0.0] [gauss_deviation=0.0] [symmetry]\n";
 		return 1;
@@ -94,36 +143,36 @@ int main(int argc, char *argv[])
 
 	std::string inputFilename=argv[1];
 	std::string outputFilename=argv[2];
-	if (argc > 3)
+	if(argc > 3)
 	{
 		threshold=std::stod(argv[3]);
 	}
-	if (argc > 4)
+	if(argc > 4)
 	{
 		resolution=std::stod(argv[4]);
 	}
-	if (argc > 5)
+	if(argc > 5)
 	{
 		gauss_radius=std::stod(argv[5]);
 	}
-	if (argc > 6)
+	if(argc > 6)
 	{
 		gauss_deviation=std::stod(argv[6]);
 	}
-	if (argc > 7)
+	if(argc > 7)
 	{
 		std::string symmetryArg = std::string(argv[7]);
-		for (char c : symmetryArg)
+		for(char c : symmetryArg)
 		{
-			if (c == 'x' || c == 'X')
+			if(c == 'x' || c == 'X')
 			{
 				XsymmetryFlag = true;
 			}
-			if (c == 'y' || c == 'Y')
+			if(c == 'y' || c == 'Y')
 			{
 				YsymmetryFlag = true;
 			}
-			if (c == 'z' || c == 'Z')
+			if(c == 'z' || c == 'Z')
 			{
 				ZsymmetryFlag = true;
 			}
@@ -145,12 +194,12 @@ int main(int argc, char *argv[])
 	gridReader->Update();
 
 	vtkUnstructuredGrid *unstructuredGrid=gridReader->GetOutput();
-	if (!unstructuredGrid)
+	if(!unstructuredGrid)
 	{
 		std::cerr << "Error: Could not read VTK file: " << inputFilename << std::endl;
 		return 1;
 	}
-	if (unstructuredGrid->GetNumberOfCells() == 0)
+	if(unstructuredGrid->GetNumberOfCells() == 0)
 	{
 		std::cerr << "Error: Grid is empty: " << inputFilename << std::endl;
 		return 1;
@@ -205,12 +254,11 @@ int main(int argc, char *argv[])
 
 	if(gauss_radius>0.0 && gauss_deviation>0.0)
 	{
-		vtkImageGaussianSmooth *gaussianSmooth=vtkImageGaussianSmooth::New();
-		gaussianSmooth->SetInputData(imageData);
-		gaussianSmooth->SetRadiusFactor(gauss_radius);
-		gaussianSmooth->SetStandardDeviation(gauss_deviation, gauss_deviation, gauss_deviation);
-		gaussianSmooth->Update();
-		imageData=gaussianSmooth->GetOutput();
+		if(0!=ApplySmoothing(imageData, gauss_radius, gauss_deviation))
+		{
+			std::cerr << "Error: smoothing operation failed";
+			return 2;
+		}
 	}
 
 	std::cout << *imageData;
@@ -230,7 +278,7 @@ int main(int argc, char *argv[])
 	stlWriter->SetFileTypeToASCII();
 	stlWriter->Write();
 
-	if (stlWriter->GetErrorCode())
+	if(stlWriter->GetErrorCode())
 	{
 		std::cerr << "Failed to generate STL file: " << outputFilename << std::endl;
 		return 1;
